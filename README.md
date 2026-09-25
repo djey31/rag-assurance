@@ -1,84 +1,94 @@
-# Assistant RAG sur conditions générales d'assurance
+# Assistant conditions générales d'assurance (RAG)
 
-Un assistant qui répond à des questions sur des conditions générales d'assurance
-en citant systématiquement ses sources, avec une **évaluation chiffrée** de la
-qualité des réponses.
+Un système de question-réponse sur des conditions générales d'assurance
+(auto, santé, prévoyance). Il répond en s'appuyant **uniquement** sur les
+documents indexés, **cite ses sources** (document et page), et **s'abstient**
+quand l'information n'est pas dans les contrats plutôt que d'inventer.
 
-Le point central du projet n'est pas le pipeline RAG, qui est standard, mais la
-mesure : savoir si le système trouve réellement la bonne information, et à quel
-prix.
+**Démo en ligne :** https://rag-assurance-l84lyjj4nxvuvum9tmxcr5.streamlit.app
 
-## Résultats
+---
 
-| Configuration | recall@5 | MRR | Taux de citation | Taux d'abstention |
-|---|---|---|---|---|
-| Découpage 600 caractères, Mistral 7B local | à compléter | | | |
-| Découpage 1200 caractères par paragraphe, Mistral 7B local | | | | |
-| Découpage 1200 caractères, modèle via API | | | | |
+## Aperçu
 
-Lecture : à compléter après la première campagne d'évaluation.
+- 15 contrats indexés (auto, santé, prévoyance), 2 343 passages
+- Recherche sémantique multilingue, réponses sourcées, garde-fou d'abstention
+- Architecture modulaire : le modèle de génération se change via une variable
+  d'environnement (Ollama en local, Groq ou Anthropic en ligne)
 
-## Architecture
+## Comment ça marche
 
-```
-PDF → extraction (pdfplumber) → découpage par paragraphe
-    → embeddings multilingues (e5-base) → ChromaDB
-                                            ↓
-question → embedding → récupération top-k → prompt contraint → réponse + sources
-```
+Le pipeline se décompose en quatre étapes.
 
-Le fournisseur de génération est abstrait dans `src/rag/llm.py` : Ollama en
-local, API Anthropic, ou toute API compatible OpenAI. Cela permet de comparer un
-modèle ouvert et un modèle propriétaire sur les mêmes questions, en ne changeant
-qu'une variable d'environnement.
+1. **Extraction** (`ingest.py`) : lecture des PDF page par page avec pdfplumber,
+   en conservant le numéro de page pour la citation.
+2. **Découpage** (`chunking.py`) : découpage par paragraphes puis par phrases,
+   avec recouvrement, en garantissant que chaque passage reste sous la limite
+   du modèle d'embeddings (512 tokens). Ce contrôle évite la troncature
+   silencieuse d'une partie du texte à l'indexation.
+3. **Vectorisation et indexation** : chaque passage est encodé avec
+   `intfloat/multilingual-e5-base` (préfixes `passage:` / `query:`, vecteurs
+   normalisés) puis stocké dans ChromaDB avec son texte et ses métadonnées.
+4. **Génération** (`answer.py`) : la question est vectorisée, les passages les
+   plus proches sont récupérés, puis transmis au modèle avec une consigne
+   stricte : répondre uniquement à partir des passages, citer les numéros
+   utilisés, et écrire « Je ne trouve pas la réponse dans les documents
+   fournis » sinon.
 
-## Installation
+## Choix techniques
 
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-```
-
-Pour le modèle en local :
-
-```bash
-ollama pull mistral:7b-instruct
-```
-
-## Utilisation
-
-```bash
-# 1. Déposer des PDF dans data/pdf/ puis indexer
-python -m src.rag.ingest
-
-# 2. Lancer l'API
-uvicorn src.rag.api:app --reload
-
-# 3. Évaluer
-python -m src.rag.evaluate --questions data/eval/questions.jsonl --k 5 --generation
-```
+- **Découpage sous la limite du modèle** : un passage trop long est tronqué
+  côté embeddings sans erreur visible. Le découpage garantit des passages
+  courts et complets, condition d'une recherche fiable.
+- **Embeddings multilingues E5** : adaptés au français juridique, avec la
+  convention de préfixes `passage:` / `query:`.
+- **Abstention** : le prompt impose de dire « Je ne trouve pas » en l'absence
+  d'information, ce qui limite les hallucinations sur des documents contractuels.
+- **Couche LLM agnostique** (`llm.py`) : Ollama, Groq (OpenAI-compatible) ou
+  Anthropic, sélectionnés par variable d'environnement, sans changer le reste
+  du code.
 
 ## Évaluation
 
-Le jeu d'évaluation (`data/eval/questions.jsonl`) associe à chaque question le
-passage du document qui contient la réponse. Voir `questions.example.jsonl` pour
-le format.
+Le module `evaluate.py` mesure la qualité de la recherche et de la génération
+sur un jeu de questions annotées : recall@k, MRR, taux de citation et taux
+d'abstention. Le script `scripts/comparer_configs.sh` compare plusieurs
+configurations (taille des passages, valeur de k).
 
-- **recall@k** : le bon passage figure-t-il parmi les k passages récupérés
-- **MRR** : à quelle position il apparaît
-- **taux de citation** : la réponse cite-t-elle au moins une source
-- **taux d'abstention** : le système reconnaît-il qu'il ne sait pas
+## Lancer en local
 
-Le taux d'hallucination est vérifié à la main sur un échantillon, car il ne se
-mesure pas automatiquement de façon fiable.
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Placer des PDF dans `data/pdf/`, puis indexer :
+
+```bash
+python -m src.rag.ingest
+```
+
+Configurer le modèle de génération dans un fichier `.env`
+(voir `.env.example`), puis lancer l'interface :
+
+```bash
+streamlit run streamlit_app.py
+```
+
+## Stack technique
+
+Python · pdfplumber · sentence-transformers (E5) · ChromaDB · Groq /
+Ollama / Anthropic · FastAPI · Streamlit · pytest · GitHub Actions
 
 ## Limites connues
 
-- Jeu d'évaluation construit manuellement, donc de taille réduite
-- L'extraction des tableaux dans les PDF reste imparfaite
-- Pas de reranking pour l'instant, c'est la prochaine amélioration à mesurer
+- L'index est figé : ajouter un contrat demande une réindexation.
+- Un passage à cheval sur deux pages est rattaché à la première.
+- Les documents scannés (sans texte sélectionnable) ne sont pas gérés
+  (OCR non intégré).
 
-## Licence
+---
 
-MIT
+Projet personnel · Djénéba Coulibaly ·
+[Portfolio](https://djey31.github.io)
