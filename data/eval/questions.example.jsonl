@@ -1,0 +1,3 @@
+{"question": "Quel est le délai de déclaration d'un sinistre vol ?", "doc_id": "cg-habitation-assureurA", "passage_attendu": "Tout sinistre vol doit être déclaré dans les deux jours ouvrés", "reponse_attendue": "2 jours ouvrés"}
+{"question": "La garantie couvre-t-elle les dommages causés par un animal domestique ?", "doc_id": "cg-habitation-assureurA", "passage_attendu": "Sont exclus les dommages causés par les animaux dont l'assuré est propriétaire", "reponse_attendue": "Non, ces dommages sont exclus"}
+{"question": "Quel est le montant de la franchise en cas de dégât des eaux ?", "doc_id": "cg-habitation-assureurB", "passage_attendu": "Une franchise de 150 euros s'applique par sinistre dégât des eaux", "reponse_attendue": "150 euros"}

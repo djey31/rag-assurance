@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+.chroma/
+.env
+data/pdf/*.pdf
+*.egg-info/
